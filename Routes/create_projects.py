@@ -748,20 +748,14 @@ async def update_project_status(payload: dict = Body(...)):
 
 
 @project_router.delete("/{project_id}")
-async def delete_project(
-    project_id: str,
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-):
-    """Delete a project and remove references from assigned students and mentors."""
-    
-    token = credentials.credentials
+async def delete_project(project_id: str):
+    """Delete a project and remove references from assigned students and mentors.
+
+    Note: this endpoint no longer requires Bearer token authentication.
+    """
     project_collection = get_project_collection()
     user_collection = get_user_collection()
-    
-    requesting_user = user_collection.find_one({"token": token})
-    if not requesting_user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
-    
+
     # Normalize project_id to int when possible
     try:
         if isinstance(project_id, str) and project_id.isdigit():
@@ -774,14 +768,6 @@ async def delete_project(
     project = project_collection.find_one({"id": normalized_project_id})
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Project with id {project_id} not found")
-    
-    creator_email = project.get("created_by_email")
-    requester_email = requesting_user.get("email")
-    requester_role = (requesting_user.get("user_role") or "").lower()
-    
-    # Only allow creator, admin, or counsellor to delete
-    if creator_email != requester_email and requester_role not in {"admin", "counsellor"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this project")
     
     # Clean up students' current_projects
     assigned_students = project.get("assigned_student", []) or []
