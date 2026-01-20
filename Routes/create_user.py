@@ -861,24 +861,14 @@ async def user_login(payload: dict):
 
 
 @user_router.delete("/delete/{user_id}", response_model=dict)
-async def delete_user(user_id: int, credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Delete a user by `id`. Requires Bearer token. Only Admin or the user themself can delete."""
-    token = credentials.credentials
+async def delete_user(user_id: int):
+    """Delete a user by `id`. No authorization required."""
     user_collection = get_user_collection()
-
-    # Verify requester
-    requester = user_collection.find_one({"token": token})
-    if not requester:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
     # Find target user by numeric id
     target = user_collection.find_one({"id": user_id})
     if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    # Authorization: allow only Admins or the user themself
-    if requester.get("user_role") != "Admin" and requester.get("id") != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this user")
 
     # Remove profile photo from disk if present
     profile_photo = target.get("profile_photo")
@@ -900,7 +890,7 @@ async def delete_user(user_id: int, credentials: HTTPAuthorizationCredentials = 
     deleted_user.pop("hashed_password", None)
     deleted_user.pop("token", None)
     if deleted_user.get("_id"):
-        deleted_user["_id"] = str(deleted_user.get("_id"))
+        deleted_user["_id"] = str(deleted_user.get("__id"))
 
     return {
         "success": True,
