@@ -188,6 +188,79 @@ async def update_ticket_status(ticket_id: str, status: str = Form(...), message:
         "message": "Ticket status updated successfully",
         "data": ticket_copy,
     }
+
+
+@ticket_router.delete("/delete/{ticket_id}", response_model=dict)
+async def delete_ticket(ticket_id: str, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Delete a ticket and its attachments. Requires Authorization Bearer token."""
+    token = credentials.credentials
+    user_collection = get_user_collection()
+    ticket_collection = get_ticket_collection()
+
+    # Verify requester
+    user = user_collection.find_one({"token": token})
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+    # Validate ObjectId
+    try:
+        oid = ObjectId(ticket_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid ticket id")
+
+    # Find the ticket
+    ticket = ticket_collection.find_one({"_id": oid})
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    # Remove attachments from disk (if any)
+    attachments = ticket.get("attachments", []) or []
+    for ap in attachments:
+        try:
+            # attachments were saved as '/path/to/file' — strip leading slash if present
+            path = ap[1:] if ap.startswith('/') else ap
+            if os.path.exists(path) and os.path.isfile(path):
+                os.remove(path)
+        except Exception:
+            # ignore individual file removal errors
+            continue
+
+    # Delete the ticket document
+    result = ticket_collection.delete_one({"_id": oid})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    # Build sanitized response similar to other endpoints
+    ticket_copy = dict(ticket)
+    ticket_copy["_id"] = str(ticket_copy.get("_id"))
+    ticket_copy["attachments"] = ticket_copy.get("attachments", [])
+
+    raised_by_email = ticket_copy.get("raised_by")
+    raised_user = None
+    if raised_by_email:
+        try:
+            u = user_collection.find_one({"email": raised_by_email})
+            if u:
+                raised_user = {
+                    "_id": str(u.get("_id")),
+                    "id": u.get("id"),
+                    "full_name": u.get("full_name"),
+                    "email": u.get("email"),
+                    "profile_photo": u.get("profile_photo"),
+                    "user_role": u.get("user_role"),
+                    "phone_number": u.get("phone_number"),
+                    "created_at": u.get("created_at")
+                }
+        except Exception:
+            raised_user = None
+
+    ticket_copy["raised_by_user"] = raised_user
+
+    return {
+        "success": True,
+        "message": "Ticket deleted successfully",
+        "data": ticket_copy,
+    }
     
     
     
