@@ -4,6 +4,7 @@ from db.database import get_meetings_collection, get_user_collection
 from models.meeting_model import MentorMeetings
 from datetime import datetime
 from typing import Optional
+from bson import ObjectId
 
 meeting_router = APIRouter(prefix="/meetings", tags=["Meetings"])
 security = HTTPBearer()
@@ -420,3 +421,33 @@ async def get_my_meeting_requests(credentials: HTTPAuthorizationCredentials = De
             pass
 
     return {"success": True, "message": "My meeting requests retrieved successfully", "data": meetings}
+
+
+@meeting_router.delete("/{meeting_id}")
+async def delete_meeting(meeting_id: str):
+    """Delete a meeting by MongoDB _id (string). No bearer token required."""
+    try:
+        meetings_collection = get_meetings_collection()
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database not available: {e}")
+
+    meeting = None
+    # Try treating meeting_id as an ObjectId
+    try:
+        meeting = meetings_collection.find_one({"_id": ObjectId(meeting_id)})
+    except Exception:
+        # fallback: try matching by string id field if present
+        meeting = meetings_collection.find_one({"id": meeting_id})
+
+    if not meeting:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Meeting with id {meeting_id} not found")
+
+    # Perform deletion
+    try:
+        # If we matched by ObjectId, delete by that; otherwise delete by the found _id
+        delete_filter = {"_id": meeting.get("_id")}
+        meetings_collection.delete_one(delete_filter)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete meeting: {e}")
+
+    return {"success": True, "message": f"Meeting {meeting_id} deleted successfully"}
