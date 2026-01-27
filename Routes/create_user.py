@@ -624,6 +624,255 @@ async def allParents():
     }
 
 
+# ........................Password Change Request APIs..........................
+
+@user_router.post("/request_password_change")
+async def request_password_change(payload: dict):
+    """Student requests password change by providing their email.
+    
+    Backend checks if email exists. If yes, creates a request for admin approval.
+    """
+    email = payload.get("email")
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is required"
+        )
+    
+    user_collection = get_user_collection()
+    requests_collection = get_password_change_requests_collection()
+    
+    # Check if user exists
+    user = user_collection.find_one({"email": email})
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User with this email not found"
+        )
+    
+    # Check if there's already a pending request for this email
+    existing_request = requests_collection.find_one({
+        "email": email,
+        "status": "pending"
+    })
+    if existing_request:
+        return {
+            "success": False,
+            "message": "A password change request is already pending for this email"
+        }
+    
+    # Create password change request
+    request_doc = {
+        "user_id": user.get("id"),
+        "email": email,
+        "full_name": user.get("full_name"),
+        "user_role": user.get("user_role"),
+        "status": "pending",  # pending, approved, rejected
+        "requested_at": datetime.utcnow(),
+        "approved_at": None,
+        "approved_by": None
+    }
+    
+    result = requests_collection.insert_one(request_doc)
+    request_doc["_id"] = str(result.inserted_id)
+    
+    return {
+        "success": True,
+        "message": "Password change request submitted successfully. Waiting for admin approval.",
+        "data": request_doc
+    }
+
+
+@user_router.get("/password_change_requests")
+async def get_password_change_requests():
+    """Admin endpoint to get all password change requests.
+    
+    No authentication required.
+    """
+    requests_collection = get_password_change_requests_collection()
+    
+    # Get all requests, sorted by newest first
+    requests = list(requests_collection.find().sort("requested_at", -1))
+    
+    for req in requests:
+        req["_id"] = str(req.get("_id"))
+    
+    return {
+        "success": True,
+        "message": "Password change requests retrieved successfully",
+        "data": requests
+    }
+
+
+@user_router.post("/approve_password_change/{request_id}")
+async def approve_password_change(request_id: str, payload: dict, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Admin approves or rejects a password change request.
+    
+    Payload: { "action": "approve" or "reject" }
+    """
+    token = credentials.credentials
+    user_collection = get_user_collection()
+    requests_collection = get_password_change_requests_collection()
+    
+    # Verify admin token
+    admin = user_collection.find_one({"token": token})
+    if not admin:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token"
+        )
+    
+    action = payload.get("action")
+    if action not in ["approve", "reject"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Action must be 'approve' or 'reject'"
+        )
+    
+    # Find the request
+    try:
+        request_doc = requests_collection.find_one({"_id": ObjectId(request_id)})
+    except Exception:
+        request_doc = None
+    
+    if not request_doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Password change request not found"
+        )
+    
+    if request_doc.get("status") != "pending":
+        return {
+            "success": False,
+            "message": f"Request has already been {request_doc.get('status')}"
+        }
+    
+    # Update request status
+    new_status = "approved" if action == "approve" else "rejected"
+    requests_collection.update_one(
+        {"_id": ObjectId(request_id)},
+        {
+            "$set": {
+                "status": new_status,
+                "approved_at": datetime.utcnow(),
+                "approved_by": admin.get("email")
+            }
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": f"Password change request {new_status} successfully",
+        "data": {
+            "request_id": request_id,
+            "status": new_status,
+            "email": request_doc.get("email")
+        }
+    }
+
+
+@user_router.post("/change_password")
+async def change_password(payload: dict):
+    """Student changes password after admin approval.
+    
+    Payload: { "email": "...", "new_password": "..." }
+    """
+    email = payload.get("email")
+    new_password = payload.get("new_password")
+    
+    if not email or not new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email and new_password are required"
+        )
+    
+    user_collection = get_user_collection()
+    requests_collection = get_password_change_requests_collection()
+    
+    # Check if user exists
+    user = user_collection.find_one({"email": email})
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check if there's an approved request for this email
+    approved_request = requests_collection.find_one({
+        "email": email,
+        "status": "approved"
+    })
+    
+    if not approved_request:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No approved password change request found. Please request password change and wait for admin approval."
+        )
+    
+    # Update password
+    hashed_password = get_password_hash(new_password)
+    user_collection.update_one(
+        {"email": email},
+        {"$set": {"hashed_password": hashed_password}}
+    )
+    
+    # Mark the request as completed (delete or update status)
+    requests_collection.update_one(
+        {"_id": approved_request.get("_id")},
+        {"$set": {"status": "completed", "completed_at": datetime.utcnow()}}
+    )
+    
+    return {
+        "success": True,
+        "message": "Password changed successfully"
+    }
+
+
+@user_router.get("/check_password_request_status")
+async def check_password_request_status(email: str):
+    """Check if a password change request exists and its status for a given email.
+    
+    Query param: email
+    """
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email query parameter is required"
+        )
+    
+    requests_collection = get_password_change_requests_collection()
+    
+    # Find the most recent request for this email
+    request = requests_collection.find_one(
+        {"email": email},
+        sort=[("requested_at", -1)]
+    )
+    
+    if not request:
+        return {
+            "success": True,
+            "message": "No password change request found",
+            "data": {
+                "has_request": False,
+                "status": None
+            }
+        }
+    
+    request["_id"] = str(request.get("_id"))
+    
+    return {
+        "success": True,
+        "message": "Password change request status retrieved",
+        "data": {
+            "has_request": True,
+            "status": request.get("status"),
+            "requested_at": request.get("requested_at"),
+            "approved_at": request.get("approved_at"),
+            "request_details": request
+        }
+    }
+
+
 @user_router.get("/{user_id}", response_model=dict)
 async def get_user_by_id(user_id: int):
     """Get user details by user ID"""
@@ -933,255 +1182,6 @@ async def delete_user(user_id: int):
         "success": True,
         "message": "User deleted successfully",
         "data": deleted_user
-    }
-
-
-# ........................Password Change Request APIs..........................
-
-@user_router.post("/request_password_change")
-async def request_password_change(payload: dict):
-    """Student requests password change by providing their email.
-    
-    Backend checks if email exists. If yes, creates a request for admin approval.
-    """
-    email = payload.get("email")
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email is required"
-        )
-    
-    user_collection = get_user_collection()
-    requests_collection = get_password_change_requests_collection()
-    
-    # Check if user exists
-    user = user_collection.find_one({"email": email})
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User with this email not found"
-        )
-    
-    # Check if there's already a pending request for this email
-    existing_request = requests_collection.find_one({
-        "email": email,
-        "status": "pending"
-    })
-    if existing_request:
-        return {
-            "success": False,
-            "message": "A password change request is already pending for this email"
-        }
-    
-    # Create password change request
-    request_doc = {
-        "user_id": user.get("id"),
-        "email": email,
-        "full_name": user.get("full_name"),
-        "user_role": user.get("user_role"),
-        "status": "pending",  # pending, approved, rejected
-        "requested_at": datetime.utcnow(),
-        "approved_at": None,
-        "approved_by": None
-    }
-    
-    result = requests_collection.insert_one(request_doc)
-    request_doc["_id"] = str(result.inserted_id)
-    
-    return {
-        "success": True,
-        "message": "Password change request submitted successfully. Waiting for admin approval.",
-        "data": request_doc
-    }
-
-
-@user_router.get("/password_change_requests")
-async def get_password_change_requests():
-    """Admin endpoint to get all password change requests.
-    
-    No authentication required.
-    """
-    requests_collection = get_password_change_requests_collection()
-    
-    # Get all requests, sorted by newest first
-    requests = list(requests_collection.find().sort("requested_at", -1))
-    
-    for req in requests:
-        req["_id"] = str(req.get("_id"))
-    
-    return {
-        "success": True,
-        "message": "Password change requests retrieved successfully",
-        "data": requests
-    }
-
-
-@user_router.post("/approve_password_change/{request_id}")
-async def approve_password_change(request_id: str, payload: dict, credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Admin approves or rejects a password change request.
-    
-    Payload: { "action": "approve" or "reject" }
-    """
-    token = credentials.credentials
-    user_collection = get_user_collection()
-    requests_collection = get_password_change_requests_collection()
-    
-    # Verify admin token
-    admin = user_collection.find_one({"token": token})
-    if not admin:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token"
-        )
-    
-    action = payload.get("action")
-    if action not in ["approve", "reject"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Action must be 'approve' or 'reject'"
-        )
-    
-    # Find the request
-    try:
-        request_doc = requests_collection.find_one({"_id": ObjectId(request_id)})
-    except Exception:
-        request_doc = None
-    
-    if not request_doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Password change request not found"
-        )
-    
-    if request_doc.get("status") != "pending":
-        return {
-            "success": False,
-            "message": f"Request has already been {request_doc.get('status')}"
-        }
-    
-    # Update request status
-    new_status = "approved" if action == "approve" else "rejected"
-    requests_collection.update_one(
-        {"_id": ObjectId(request_id)},
-        {
-            "$set": {
-                "status": new_status,
-                "approved_at": datetime.utcnow(),
-                "approved_by": admin.get("email")
-            }
-        }
-    )
-    
-    return {
-        "success": True,
-        "message": f"Password change request {new_status} successfully",
-        "data": {
-            "request_id": request_id,
-            "status": new_status,
-            "email": request_doc.get("email")
-        }
-    }
-
-
-@user_router.post("/change_password")
-async def change_password(payload: dict):
-    """Student changes password after admin approval.
-    
-    Payload: { "email": "...", "new_password": "..." }
-    """
-    email = payload.get("email")
-    new_password = payload.get("new_password")
-    
-    if not email or not new_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email and new_password are required"
-        )
-    
-    user_collection = get_user_collection()
-    requests_collection = get_password_change_requests_collection()
-    
-    # Check if user exists
-    user = user_collection.find_one({"email": email})
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    # Check if there's an approved request for this email
-    approved_request = requests_collection.find_one({
-        "email": email,
-        "status": "approved"
-    })
-    
-    if not approved_request:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="No approved password change request found. Please request password change and wait for admin approval."
-        )
-    
-    # Update password
-    hashed_password = get_password_hash(new_password)
-    user_collection.update_one(
-        {"email": email},
-        {"$set": {"hashed_password": hashed_password}}
-    )
-    
-    # Mark the request as completed (delete or update status)
-    requests_collection.update_one(
-        {"_id": approved_request.get("_id")},
-        {"$set": {"status": "completed", "completed_at": datetime.utcnow()}}
-    )
-    
-    return {
-        "success": True,
-        "message": "Password changed successfully"
-    }
-
-
-@user_router.get("/check_password_request_status")
-async def check_password_request_status(email: str):
-    """Check if a password change request exists and its status for a given email.
-    
-    Query param: email
-    """
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email query parameter is required"
-        )
-    
-    requests_collection = get_password_change_requests_collection()
-    
-    # Find the most recent request for this email
-    request = requests_collection.find_one(
-        {"email": email},
-        sort=[("requested_at", -1)]
-    )
-    
-    if not request:
-        return {
-            "success": True,
-            "message": "No password change request found",
-            "data": {
-                "has_request": False,
-                "status": None
-            }
-        }
-    
-    request["_id"] = str(request.get("_id"))
-    
-    return {
-        "success": True,
-        "message": "Password change request status retrieved",
-        "data": {
-            "has_request": True,
-            "status": request.get("status"),
-            "requested_at": request.get("requested_at"),
-            "approved_at": request.get("approved_at"),
-            "request_details": request
-        }
     }
     
     
