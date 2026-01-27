@@ -174,6 +174,46 @@ async def get_all_new_meetings():
     return {"success": True, "message": "All meetings retrieved successfully", "data": meetings}
 
 
+@meeting_router.get('/my_participant_meetings')
+async def get_my_participant_meetings(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get all meetings where the authenticated user is a participant.
+    
+    Checks if user's email exists in student_emails, mentor_emails, or parent_emails arrays.
+    """
+    token = credentials.credentials
+    try:
+        user_collection = get_user_collection()
+        meetings_collection = get_meetings_collection()
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database not available: {e}")
+
+    user = user_collection.find_one({"token": token})
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+    user_email = user.get('email')
+    if not user_email:
+        return {"success": True, "message": "User has no email", "data": []}
+
+    try:
+        # Find meetings where user email exists in any of the participant arrays
+        query = {
+            "$or": [
+                {"student_emails": user_email},
+                {"mentor_emails": user_email},
+                {"parent_emails": user_email}
+            ]
+        }
+        meetings = list(meetings_collection.find(query).sort("created_at", -1))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch meetings: {e}")
+
+    for m in meetings:
+        m["_id"] = str(m.get("_id"))
+
+    return {"success": True, "message": f"Participant meetings for {user_email} retrieved successfully", "data": meetings}
+
+
 @meeting_router.post('/request')
 async def request_meeting(payload: dict = Body(...), credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Create a meeting request. The requesting user's email is set in `request_by_meeting` (from token).
