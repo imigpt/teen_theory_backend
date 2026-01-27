@@ -120,6 +120,60 @@ async def create_new_meeting(payload: dict = Body(...), credentials: HTTPAuthori
     return {"success": True, "message": "Meeting created successfully", "data": meeting_doc}
 
 
+@meeting_router.get('/get_new_meetings')
+async def get_new_meetings(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get all meetings created via create_new_meeting endpoint by the authenticated user.
+    
+    Returns meetings where created_by_email matches the token user's email.
+    """
+    token = credentials.credentials
+    try:
+        user_collection = get_user_collection()
+        meetings_collection = get_meetings_collection()
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database not available: {e}")
+
+    user = user_collection.find_one({"token": token})
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+    user_email = user.get('email')
+
+    try:
+        # Find meetings created by this user via create_new_meeting (identified by created_by_email field)
+        meetings = list(meetings_collection.find({"created_by_email": user_email}).sort("created_at", -1))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch meetings: {e}")
+
+    for m in meetings:
+        m["_id"] = str(m.get("_id"))
+
+    return {"success": True, "message": "Meetings retrieved successfully", "data": meetings}
+
+
+@meeting_router.get('/get_all_new_meetings')
+async def get_all_new_meetings():
+    """Get all meetings created via create_new_meeting endpoint (no authentication required).
+    
+    Returns all meetings that have the structure from create_new_meeting.
+    """
+    try:
+        meetings_collection = get_meetings_collection()
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database not available: {e}")
+
+    try:
+        # Find all meetings that have created_by_email field (created via create_new_meeting)
+        meetings = list(meetings_collection.find({"created_by_email": {"$exists": True}}).sort("created_at", -1))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch meetings: {e}")
+
+    for m in meetings:
+        m["_id"] = str(m.get("_id"))
+
+    return {"success": True, "message": "All meetings retrieved successfully", "data": meetings}
+
+
 @meeting_router.post('/request')
 async def request_meeting(payload: dict = Body(...), credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Create a meeting request. The requesting user's email is set in `request_by_meeting` (from token).
