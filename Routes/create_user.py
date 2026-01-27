@@ -705,22 +705,13 @@ async def get_password_change_requests():
 
 
 @user_router.post("/approve_password_change/{request_id}")
-async def approve_password_change(request_id: str, payload: dict, credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def approve_password_change(request_id: str, payload: dict):
     """Admin approves or rejects a password change request.
     
     Payload: { "action": "approve" or "reject" }
+    No authentication required.
     """
-    token = credentials.credentials
-    user_collection = get_user_collection()
     requests_collection = get_password_change_requests_collection()
-    
-    # Verify admin token
-    admin = user_collection.find_one({"token": token})
-    if not admin:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token"
-        )
     
     action = payload.get("action")
     if action not in ["approve", "reject"]:
@@ -755,7 +746,7 @@ async def approve_password_change(request_id: str, payload: dict, credentials: H
             "$set": {
                 "status": new_status,
                 "approved_at": datetime.utcnow(),
-                "approved_by": admin.get("email")
+                "approved_by": "admin"
             }
         }
     )
