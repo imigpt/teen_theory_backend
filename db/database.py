@@ -74,3 +74,7 @@ def get_chats_collection():
 def get_conversation_collection():
     db = get_database()
     return db["conversations"]
+
+def get_password_change_requests_collection():
+    db = get_database()
+    return db["password_change_requests"]
