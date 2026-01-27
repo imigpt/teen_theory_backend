@@ -59,6 +59,67 @@ async def create_meeting(payload: dict = Body(...), credentials: HTTPAuthorizati
     return {"success": True, "message": "Meeting created successfully", "data": meeting_doc}
 
 
+@meeting_router.post('/create_new_meeting')
+async def create_new_meeting(payload: dict = Body(...), credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Create a new meeting with multiple participants (students, mentors, parents).
+    
+    Required fields: meeting_title, meeting_link
+    Optional fields: meeting_description, student_emails, mentor_emails, parent_emails
+    Creator's email is taken from the bearer token.
+    """
+    token = credentials.credentials
+    try:
+        user_collection = get_user_collection()
+        meetings_collection = get_meetings_collection()
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database not available: {e}")
+
+    user = user_collection.find_one({"token": token})
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+    # Validate required fields
+    meeting_title = payload.get('meeting_title')
+    meeting_link = payload.get('meeting_link')
+
+    if not meeting_title or not meeting_link:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="`meeting_title` and `meeting_link` are required")
+
+    # Get optional fields (ensure they are lists)
+    student_emails = payload.get('student_emails', [])
+    mentor_emails = payload.get('mentor_emails', [])
+    parent_emails = payload.get('parent_emails', [])
+    
+    # Ensure they are lists
+    if not isinstance(student_emails, list):
+        student_emails = [student_emails] if student_emails else []
+    if not isinstance(mentor_emails, list):
+        mentor_emails = [mentor_emails] if mentor_emails else []
+    if not isinstance(parent_emails, list):
+        parent_emails = [parent_emails] if parent_emails else []
+
+    meeting_doc = {
+        "created_by_email": user.get('email'),
+        "meeting_title": meeting_title,
+        "meeting_description": payload.get('meeting_description', ''),
+        "meeting_link": meeting_link,
+        "student_emails": student_emails,
+        "mentor_emails": mentor_emails,
+        "parent_emails": parent_emails,
+        "status": payload.get('status', 'scheduled'),
+        "created_at": datetime.utcnow()
+    }
+
+    try:
+        result = meetings_collection.insert_one(meeting_doc)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to save meeting: {e}")
+
+    meeting_doc["_id"] = str(result.inserted_id)
+
+    return {"success": True, "message": "Meeting created successfully", "data": meeting_doc}
+
+
 @meeting_router.post('/request')
 async def request_meeting(payload: dict = Body(...), credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Create a meeting request. The requesting user's email is set in `request_by_meeting` (from token).
