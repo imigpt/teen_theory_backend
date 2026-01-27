@@ -996,29 +996,12 @@ async def request_password_change(payload: dict):
 
 
 @user_router.get("/password_change_requests")
-async def get_password_change_requests(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_password_change_requests():
     """Admin endpoint to get all password change requests.
     
-    Requires admin authentication via bearer token.
+    No authentication required.
     """
-    token = credentials.credentials
-    user_collection = get_user_collection()
     requests_collection = get_password_change_requests_collection()
-    
-    # Verify admin token (check if user is admin/counsellor)
-    admin = user_collection.find_one({"token": token})
-    if not admin:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token"
-        )
-    
-    # Optional: Check if user has admin role
-    # if admin.get("user_role") not in ["Admin", "Counsellor"]:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_403_FORBIDDEN,
-    #         detail="Only admins can view password change requests"
-    #     )
     
     # Get all requests, sorted by newest first
     requests = list(requests_collection.find().sort("requested_at", -1))

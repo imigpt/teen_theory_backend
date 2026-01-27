@@ -300,6 +300,354 @@ async def create_project(
         "data": project_dict
     }
 
+
+# UPDATE PROJECT ENDPOINT...........................
+@project_router.put("/update", status_code=status.HTTP_200_OK)
+async def update_project(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    project_id: int = Form(...),
+    title: Optional[str] = Form(None),
+    project_type: Optional[str] = Form(None),
+    project_description: Optional[str] = Form(None),
+    status_field: Optional[str] = Form(None),
+    assigned_student: Optional[str] = Form(None),
+    assigned_mentor: Optional[str] = Form(None),
+    project_counsellor: Optional[str] = Form(None),
+    milestones: Optional[str] = Form(None),
+    tasks: Optional[str] = Form(None),
+    deliverables_title: Optional[str] = Form(None),
+    deliverables_type: Optional[List[str]] = Form(None),
+    due_date: Optional[str] = Form(None),
+    linked_milestones: Optional[str] = Form(None),
+    metadata_and_req: Optional[str] = Form(None),
+    page_limit: Optional[str] = Form(None),
+    additional_instructions: Optional[str] = Form(None),
+    allow_multiple_submissions: Optional[bool] = Form(None),
+    montor_approval: Optional[bool] = Form(None),
+    counsellor_approval: Optional[bool] = Form(None),
+    resources_type: Optional[str] = Form(None),
+    resources_title: Optional[str] = Form(None),
+    resources_description: Optional[str] = Form(None),
+    attached_files: Optional[UploadFile] = File(None),
+    student_visibility: Optional[bool] = Form(None),
+    mentor_visibility: Optional[bool] = Form(None),
+    session_type: Optional[str] = Form(None),
+    purpose: Optional[str] = Form(None),
+    preferred_time: Optional[str] = Form(None),
+    duration: Optional[str] = Form(None)
+):
+    """Update an existing project. All fields except project_id are optional."""
+    token = credentials.credentials
+    user_collection = get_user_collection()
+    project_collection = get_project_collection()
+    
+    # Verify user token
+    user = user_collection.find_one({"token": token})
+    if not user:
+        return {
+            "success": False,
+            "message": "Invalid or expired token"
+        }
+    
+    # Find existing project
+    existing_project = project_collection.find_one({"id": project_id})
+    if not existing_project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project with id {project_id} not found"
+        )
+    
+    # Prepare update data
+    update_data = {}
+    
+    if title is not None:
+        update_data["title"] = title
+    if project_type is not None:
+        update_data["project_type"] = project_type
+    if project_description is not None:
+        update_data["project_description"] = project_description
+    if status_field is not None:
+        update_data["status"] = status_field
+    if project_counsellor is not None:
+        update_data["project_counsellor"] = project_counsellor
+    if due_date is not None:
+        update_data["due_date"] = due_date
+    if linked_milestones is not None:
+        update_data["linked_milestones"] = linked_milestones
+    if metadata_and_req is not None:
+        update_data["metadata_and_req"] = metadata_and_req
+    if page_limit is not None:
+        update_data["page_limit"] = page_limit
+    if additional_instructions is not None:
+        update_data["additional_instructions"] = additional_instructions
+    if allow_multiple_submissions is not None:
+        update_data["allow_multiple_submissions"] = allow_multiple_submissions
+    if montor_approval is not None:
+        update_data["montor_approval"] = montor_approval
+    if counsellor_approval is not None:
+        update_data["counsellor_approval"] = counsellor_approval
+    if resources_type is not None:
+        update_data["resources_type"] = resources_type
+    if resources_title is not None:
+        update_data["resources_title"] = resources_title
+    if resources_description is not None:
+        update_data["resources_description"] = resources_description
+    if student_visibility is not None:
+        update_data["student_visibility"] = student_visibility
+    if mentor_visibility is not None:
+        update_data["mentor_visibility"] = mentor_visibility
+    if session_type is not None:
+        update_data["session_type"] = session_type
+    if purpose is not None:
+        update_data["purpose"] = purpose
+    if preferred_time is not None:
+        update_data["preferred_time"] = preferred_time
+    if duration is not None:
+        update_data["duration"] = duration
+    if deliverables_title is not None:
+        update_data["deliverables_title"] = deliverables_title
+    
+    # Handle file upload if provided
+    if attached_files is not None:
+        # Remove old file if exists
+        old_file = existing_project.get("attached_files")
+        if old_file:
+            old_file_path = old_file.lstrip("/\\")
+            if os.path.isfile(old_file_path):
+                try:
+                    os.remove(old_file_path)
+                except OSError:
+                    pass
+        
+        # Save new file
+        upload_dir = "uploads/project_files"
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        file_extension = os.path.splitext(attached_files.filename)[1]
+        unique_filename = f"project_{project_id}_{secrets.token_hex(8)}{file_extension}"
+        file_path = os.path.join(upload_dir, unique_filename)
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(attached_files.file, buffer)
+        
+        update_data["attached_files"] = f"/{file_path.replace(os.sep, '/')}"
+    
+    # Parse and update assigned_student
+    if assigned_student is not None:
+        old_students = existing_project.get("assigned_student", []) or []
+        
+        assigned_student_list = []
+        if assigned_student.strip():
+            try:
+                assigned_student_list = json.loads(assigned_student)
+            except:
+                assigned_student_list = [assigned_student]
+        
+        update_data["assigned_student"] = assigned_student_list
+        
+        # Remove project from old students who are no longer assigned
+        old_student_ids = set()
+        for s in old_students:
+            sid = s.get("id") if isinstance(s, dict) else s
+            if sid:
+                old_student_ids.add(str(sid))
+        
+        new_student_ids = set()
+        for s in assigned_student_list:
+            sid = s.get("id") if isinstance(s, dict) else s
+            if sid:
+                new_student_ids.add(str(sid))
+        
+        # Remove from students no longer assigned
+        removed_students = old_student_ids - new_student_ids
+        for student_id in removed_students:
+            try:
+                student = user_collection.find_one({"_id": ObjectId(student_id)})
+                if student:
+                    current_projects = student.get("current_projects", [])
+                    filtered = [p for p in current_projects if p.get("project_id") != project_id]
+                    user_collection.update_one(
+                        {"_id": ObjectId(student_id)},
+                        {"$set": {"current_projects": filtered}}
+                    )
+            except Exception:
+                pass
+        
+        # Add to new students
+        added_students = new_student_ids - old_student_ids
+        for student_id in added_students:
+            try:
+                student = user_collection.find_one({"_id": ObjectId(student_id)})
+                if student:
+                    current_projects = student.get("current_projects", [])
+                    project_info = {
+                        "project_id": project_id,
+                        "title": update_data.get("title", existing_project.get("title")),
+                        "status": update_data.get("status", existing_project.get("status")),
+                        "assigned_date": datetime.utcnow()
+                    }
+                    current_projects.append(project_info)
+                    user_collection.update_one(
+                        {"_id": ObjectId(student_id)},
+                        {"$set": {"current_projects": current_projects}}
+                    )
+            except Exception:
+                pass
+    
+    # Parse and update assigned_mentor
+    if assigned_mentor is not None:
+        old_mentors = existing_project.get("assigned_mentor", []) or []
+        
+        assigned_mentor_list = []
+        if assigned_mentor.strip():
+            try:
+                assigned_mentor_list = json.loads(assigned_mentor)
+            except:
+                assigned_mentor_list = [assigned_mentor]
+        
+        update_data["assigned_mentor"] = assigned_mentor_list
+        
+        # Remove project from old mentors who are no longer assigned
+        old_mentor_ids = set()
+        for m in old_mentors:
+            mid = m.get("id") if isinstance(m, dict) else m
+            if mid:
+                old_mentor_ids.add(str(mid))
+        
+        new_mentor_ids = set()
+        for m in assigned_mentor_list:
+            mid = m.get("id") if isinstance(m, dict) else m
+            if mid:
+                new_mentor_ids.add(str(mid))
+        
+        # Remove from mentors no longer assigned
+        removed_mentors = old_mentor_ids - new_mentor_ids
+        for mentor_id in removed_mentors:
+            try:
+                mentor = user_collection.find_one({"_id": ObjectId(mentor_id)})
+                if mentor:
+                    assigned_projects = mentor.get("assigned_projects", [])
+                    filtered = [p for p in assigned_projects if p.get("project_id") != project_id]
+                    user_collection.update_one(
+                        {"_id": ObjectId(mentor_id)},
+                        {"$set": {"assigned_projects": filtered}}
+                    )
+            except Exception:
+                pass
+        
+        # Add to new mentors
+        added_mentors = new_mentor_ids - old_mentor_ids
+        for mentor_id in added_mentors:
+            try:
+                mentor = user_collection.find_one({"_id": ObjectId(mentor_id)})
+                if mentor:
+                    assigned_projects = mentor.get("assigned_projects", [])
+                    project_info = {
+                        "project_id": project_id,
+                        "title": update_data.get("title", existing_project.get("title")),
+                        "status": update_data.get("status", existing_project.get("status")),
+                        "assigned_date": datetime.utcnow()
+                    }
+                    assigned_projects.append(project_info)
+                    user_collection.update_one(
+                        {"_id": ObjectId(mentor_id)},
+                        {"$set": {"assigned_projects": assigned_projects}}
+                    )
+            except Exception:
+                pass
+    
+    # Parse and update milestones
+    if milestones is not None:
+        milestones_list = []
+        if milestones.strip():
+            try:
+                milestones_list = json.loads(milestones)
+            except:
+                milestones_list = [milestones]
+        
+        # Normalize milestones
+        normalized_milestones = []
+        for idx, m in enumerate(milestones_list):
+            if isinstance(m, dict):
+                m_copy = dict(m)
+            else:
+                m_copy = {"name": m}
+            
+            if not m_copy.get("id"):
+                m_copy["id"] = f"{project_id}-{idx}-{secrets.token_hex(6)}"
+            
+            m_copy.setdefault("status", "pending")
+            
+            raw_tasks = m_copy.get("tasks", []) or []
+            normalized_tasks = []
+            for t in raw_tasks:
+                if isinstance(t, dict):
+                    t_copy = dict(t)
+                else:
+                    t_copy = {"title": t}
+                t_copy.setdefault("status", "pending")
+                normalized_tasks.append(t_copy)
+            m_copy["tasks"] = normalized_tasks
+            
+            normalized_milestones.append(m_copy)
+        
+        update_data["milestones"] = normalized_milestones
+    
+    # Parse and update tasks
+    if tasks is not None:
+        tasks_list = []
+        if tasks.strip():
+            try:
+                tasks_list = json.loads(tasks)
+            except:
+                tasks_list = [tasks]
+        update_data["tasks"] = tasks_list
+    
+    # Parse and update deliverables_type
+    if deliverables_type is not None:
+        deliverables_type_list = []
+        if isinstance(deliverables_type, list):
+            deliverables_type_list = [str(x).strip() for x in deliverables_type if x and str(x).strip()]
+        else:
+            try:
+                parsed = json.loads(deliverables_type)
+                if isinstance(parsed, list):
+                    deliverables_type_list = [str(x).strip() for x in parsed if x and str(x).strip()]
+                else:
+                    deliverables_type_list = [str(parsed).strip()]
+            except Exception:
+                s = str(deliverables_type)
+                if "," in s:
+                    deliverables_type_list = [p.strip() for p in s.split(",") if p.strip()]
+                elif s.strip():
+                    deliverables_type_list = [s.strip()]
+        update_data["deliverables_type"] = deliverables_type_list
+    
+    if not update_data:
+        return {
+            "success": False,
+            "message": "No fields to update"
+        }
+    
+    # Add updated timestamp
+    update_data["updated_at"] = datetime.utcnow()
+    
+    # Update project in database
+    project_collection.update_one(
+        {"id": project_id},
+        {"$set": update_data}
+    )
+    
+    # Get updated project
+    updated_project = project_collection.find_one({"id": project_id})
+    updated_project["_id"] = str(updated_project["_id"])
+    
+    return {
+        "success": True,
+        "message": "Project updated successfully",
+        "data": updated_project
+    }
+
 # ........................Get All Projects Endpoint..........................
 
 @project_router.get("/all_projects")
