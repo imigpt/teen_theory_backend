@@ -586,6 +586,42 @@ async def allCounsellors():
         "data": counsellors
     }
 
+@user_router.get("/all_parents")
+async def allParents():
+    user_collection = get_user_collection()
+    project_collection = get_project_collection()
+    
+    # Filter only users having user_role = "Parent"
+    parents = list(user_collection.find({"user_role": "Parent"}))
+    
+    if not parents:
+        return {
+            "success": True,
+            "message": "No parents found",
+            "data": []
+        }
+    
+    # Process each parent and expand child profile
+    for parent in parents:
+        parent["_id"] = str(parent["_id"])
+        
+        # Expand child email (if present) into child's full profile
+        child_field = parent.get("child")
+        if isinstance(child_field, str) and "@" in child_field:
+            child_doc = user_collection.find_one({"email": child_field})
+            if child_doc:
+                # Build child's profile
+                child_profile = build_user_profile(child_doc, user_collection, expand_child=False)
+                # Get child's assigned projects
+                child_profile["assigned_projects"] = get_assigned_projects_for_user(child_doc, project_collection)
+                parent["child"] = child_profile
+    
+    return {
+        "success": True,
+        "message": "All parents retrieved successfully",
+        "data": parents
+    }
+
 
 @user_router.get("/{user_id}", response_model=dict)
 async def get_user_by_id(user_id: int):
