@@ -174,6 +174,35 @@ async def get_all_new_meetings():
     return {"success": True, "message": "All meetings retrieved successfully", "data": meetings}
 
 
+@meeting_router.delete('/delete_new_meeting/{meeting_id}')
+async def delete_new_meeting(meeting_id: str):
+    """Delete a meeting created via create_new_meeting endpoint.
+    
+    No authentication required.
+    """
+    try:
+        meetings_collection = get_meetings_collection()
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database not available: {e}")
+
+    # Find the meeting
+    try:
+        meeting = meetings_collection.find_one({"_id": ObjectId(meeting_id)})
+    except Exception:
+        meeting = None
+
+    if not meeting:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+
+    # Delete the meeting
+    try:
+        meetings_collection.delete_one({"_id": ObjectId(meeting_id)})
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete meeting: {e}")
+
+    return {"success": True, "message": "Meeting deleted successfully"}
+
+
 @meeting_router.get('/my_participant_meetings')
 async def get_my_participant_meetings(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Get all meetings where the authenticated user is a participant.
