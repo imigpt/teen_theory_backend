@@ -917,7 +917,9 @@ async def update_user(
     current_projects: Optional[str] = Form(None),  # JSON string
     mentor: Optional[str] = Form(None),
     total_projects: Optional[str] = Form(None),  # JSON string
-    completed_project: Optional[str] = Form(None)  # JSON string
+    completed_project: Optional[str] = Form(None),  # JSON string
+    start_shift_time: Optional[str] = Form(None),
+    end_shift_time: Optional[str] = Form(None)
 ):
     """Update user details using Bearer token with file upload support"""
     import json
@@ -1035,6 +1037,11 @@ async def update_user(
         except:
             update_data["completed_project"] = [completed_project]
     
+    if start_shift_time is not None:
+        update_data["start_shift_time"] = start_shift_time
+    if end_shift_time is not None:
+        update_data["end_shift_time"] = end_shift_time
+    
     if not update_data:
         return {
             "success": False,
@@ -1083,6 +1090,8 @@ async def update_user(
         "mentor": updated_user.get("mentor"),
         "total_projects": updated_user.get("total_projects", []),
         "completed_project": updated_user.get("completed_project", []),
+        "start_shift_time": updated_user.get("start_shift_time"),
+        "end_shift_time": updated_user.get("end_shift_time"),
         "created_at": updated_user.get("created_at"),
         "updated_at": updated_user.get("updated_at"),
         "is_active": updated_user.get("is_active", True)
@@ -1092,6 +1101,66 @@ async def update_user(
         "success": True,
         "message": "User updated successfully",
         "data": user_dict
+    }
+
+# ........................Update Shift Time Endpoint..........................
+
+@user_router.put("/update_shift_time")
+async def update_shift_time(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    start_shift_time: Optional[str] = Form(None),
+    end_shift_time: Optional[str] = Form(None)
+):
+    """Update user shift timings using Bearer token"""
+    token = credentials.credentials
+    user_collection = get_user_collection()
+    
+    # Find user by token
+    user = user_collection.find_one({"token": token})
+    
+    if not user:
+        return {
+            "success": False,
+            "message": "Invalid or expired token"
+        }
+    
+    # Prepare update data
+    update_data = {}
+    
+    if start_shift_time is not None:
+        update_data["start_shift_time"] = start_shift_time
+    if end_shift_time is not None:
+        update_data["end_shift_time"] = end_shift_time
+    
+    if not update_data:
+        return {
+            "success": False,
+            "message": "No shift time fields to update"
+        }
+    
+    # Add updated timestamp
+    update_data["updated_at"] = datetime.utcnow()
+    
+    # Update user in database
+    user_collection.update_one(
+        {"_id": user["_id"]},
+        {"$set": update_data}
+    )
+    
+    # Get updated user
+    updated_user = user_collection.find_one({"_id": user["_id"]})
+    
+    return {
+        "success": True,
+        "message": "Shift time updated successfully",
+        "data": {
+            "id": updated_user.get("id"),
+            "email": updated_user.get("email"),
+            "full_name": updated_user.get("full_name"),
+            "start_shift_time": updated_user.get("start_shift_time"),
+            "end_shift_time": updated_user.get("end_shift_time"),
+            "updated_at": updated_user.get("updated_at")
+        }
     }
     
 # ........................User Login Endpoint..........................
