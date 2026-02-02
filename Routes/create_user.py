@@ -413,6 +413,25 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                         "user_role": creator.get("user_role")
                     }
             
+            # Enrich assigned_mentor with shift times
+            assigned_mentors = project.get("assigned_mentor", [])
+            enriched_mentors = []
+            if assigned_mentors:
+                mentors_list = assigned_mentors if isinstance(assigned_mentors, list) else [assigned_mentors]
+                for mentor in mentors_list:
+                    if isinstance(mentor, dict):
+                        mentor_id = mentor.get("id")
+                        if mentor_id:
+                            try:
+                                mentor_user = user_collection.find_one({"_id": ObjectId(mentor_id)})
+                                if mentor_user:
+                                    mentor["start_shift_time"] = mentor_user.get("start_shift_time")
+                                    mentor["end_shift_time"] = mentor_user.get("end_shift_time")
+                            except Exception:
+                                pass
+                    enriched_mentors.append(mentor)
+                assigned_mentors = enriched_mentors if isinstance(project.get("assigned_mentor", []), list) else enriched_mentors[0] if enriched_mentors else assigned_mentors
+            
             project_info = {
                 "project_id": project.get("id"),
                 "title": project.get("title"),
@@ -422,7 +441,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 "created_by_email": created_by_email,
                 "created_by_user": created_by_user,
                 "assigned_student": project.get("assigned_student", []),
-                "assigned_mentor": project.get("assigned_mentor", []),
+                "assigned_mentor": assigned_mentors,
                 "project_counsellor": project.get("project_counsellor"),
                 "milestones": processed_milestones,
                 "tasks": processed_tasks,
