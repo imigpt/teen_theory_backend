@@ -64,6 +64,8 @@ def build_user_profile(user_doc, user_collection, expand_child=False):
         "mentor": user_doc.get("mentor"),
         "total_projects": user_doc.get("total_projects", []),
         "completed_project": user_doc.get("completed_project", []),
+        "start_shift_time": user_doc.get("start_shift_time"),
+        "end_shift_time": user_doc.get("end_shift_time"),
         "created_at": user_doc.get("created_at"),
         "is_active": user_doc.get("is_active", True)
     }
@@ -278,6 +280,8 @@ async def create_user(user: CreateUserModel):
         "mentor" : user.mentor,
         "total_projects" : user.total_projects,
         "completed_project" : user.completed_project,
+        "start_shift_time" : user.start_shift_time,
+        "end_shift_time" : user.end_shift_time,
         "created_at": datetime.utcnow(),
         "is_active": True
     }

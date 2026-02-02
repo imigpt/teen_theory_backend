@@ -32,6 +32,8 @@ class CreateUserModel(BaseModel):
     mentor: Optional[str] = None
     total_projects: Optional[list] = []
     completed_project: Optional[list] = []
+    start_shift_time: Optional[str] = None
+    end_shift_time: Optional[str] = None
 
 class UserData(BaseModel):
     id: int
@@ -63,6 +65,8 @@ class UserData(BaseModel):
     mentor: Optional[str] = None
     total_projects: Optional[list] = []
     completed_project: Optional[list] = []
+    start_shift_time: Optional[str] = None
+    end_shift_time: Optional[str] = None
     created_at: Optional[datetime] = None
     is_active: Optional[bool] = True
     
