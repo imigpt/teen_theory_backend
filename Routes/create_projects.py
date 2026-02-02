@@ -19,6 +19,30 @@ def get_next_project_id():
     last_project = project_collection.find_one(sort=[("id", -1)])
     return (last_project["id"] + 1) if last_project else 1
 
+def enrich_mentor_data_with_shift_times(assigned_mentors, user_collection):
+    """Enrich assigned mentor data with start_shift_time and end_shift_time from user profiles"""
+    if not assigned_mentors:
+        return assigned_mentors
+    
+    # Handle both dict and list formats
+    mentors_list = assigned_mentors if isinstance(assigned_mentors, list) else [assigned_mentors]
+    enriched_mentors = []
+    
+    for mentor in mentors_list:
+        if isinstance(mentor, dict):
+            mentor_id = mentor.get("id")
+            if mentor_id:
+                try:
+                    mentor_user = user_collection.find_one({"_id": ObjectId(mentor_id)})
+                    if mentor_user:
+                        mentor["start_shift_time"] = mentor_user.get("start_shift_time")
+                        mentor["end_shift_time"] = mentor_user.get("end_shift_time")
+                except Exception:
+                    pass
+        enriched_mentors.append(mentor)
+    
+    return enriched_mentors if isinstance(assigned_mentors, list) else enriched_mentors[0] if enriched_mentors else assigned_mentors
+
 
 
 # CREATE PEOJECT ENDPOINTs...........................
@@ -104,6 +128,22 @@ async def create_project(
             assigned_mentor_list = json.loads(assigned_mentor)
         except:
             assigned_mentor_list = [assigned_mentor]
+    
+    # Enrich assigned_mentor_list with shift times from user collection
+    enriched_mentor_list = []
+    for mentor_data in assigned_mentor_list:
+        if isinstance(mentor_data, dict):
+            mentor_id = mentor_data.get("id")
+            if mentor_id:
+                try:
+                    mentor_user = user_collection.find_one({"_id": ObjectId(mentor_id)})
+                    if mentor_user:
+                        mentor_data["start_shift_time"] = mentor_user.get("start_shift_time")
+                        mentor_data["end_shift_time"] = mentor_user.get("end_shift_time")
+                except Exception:
+                    pass
+        enriched_mentor_list.append(mentor_data)
+    assigned_mentor_list = enriched_mentor_list
     
     milestones_list = []
     if milestones and milestones.strip():
@@ -505,6 +545,22 @@ async def update_project(
             except:
                 assigned_mentor_list = [assigned_mentor]
         
+        # Enrich assigned_mentor_list with shift times from user collection
+        enriched_mentor_list = []
+        for mentor_data in assigned_mentor_list:
+            if isinstance(mentor_data, dict):
+                mentor_id = mentor_data.get("id")
+                if mentor_id:
+                    try:
+                        mentor_user = user_collection.find_one({"_id": ObjectId(mentor_id)})
+                        if mentor_user:
+                            mentor_data["start_shift_time"] = mentor_user.get("start_shift_time")
+                            mentor_data["end_shift_time"] = mentor_user.get("end_shift_time")
+                    except Exception:
+                        pass
+            enriched_mentor_list.append(mentor_data)
+        assigned_mentor_list = enriched_mentor_list
+        
         update_data["assigned_mentor"] = assigned_mentor_list
         
         # Remove project from old mentors who are no longer assigned
@@ -654,6 +710,7 @@ async def update_project(
 async def get_all_projects():
     """Get all projects"""
     project_collection = get_project_collection()
+    user_collection = get_user_collection()
     projects = list(project_collection.find())
     
     # Convert projects to response format
@@ -698,7 +755,7 @@ async def get_all_projects():
             "status": project.get("status", "pending"),
             "created_by_email": project.get("created_by_email"),
             "assigned_student": project.get("assigned_student", []),
-            "assigned_mentor": project.get("assigned_mentor", []),
+            "assigned_mentor": enrich_mentor_data_with_shift_times(project.get("assigned_mentor", []), user_collection),
             "project_counsellor": project.get("project_counsellor"),
             "milestones": processed_milestones,
             "tasks": processed_tasks,
@@ -743,6 +800,7 @@ async def get_projects_by_mentor(email: str = None):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="`email` query parameter is required")
 
     project_collection = get_project_collection()
+    user_collection = get_user_collection()
     try:
         # match mentor entries that are dicts with an email field
         projects = list(project_collection.find({"assigned_mentor.email": email}))
@@ -790,7 +848,7 @@ async def get_projects_by_mentor(email: str = None):
             "status": project.get("status", "pending"),
             "created_by_email": project.get("created_by_email"),
             "assigned_student": project.get("assigned_student", []),
-            "assigned_mentor": project.get("assigned_mentor", []),
+            "assigned_mentor": enrich_mentor_data_with_shift_times(project.get("assigned_mentor", []), user_collection),
             "project_counsellor": project.get("project_counsellor"),
             "milestones": processed_milestones,
             "tasks": processed_tasks,
@@ -883,7 +941,7 @@ async def get_my_projects(credentials: HTTPAuthorizationCredentials = Depends(se
             "status": project.get("status", "pending"),
             "created_by_email": project.get("created_by_email"),
             "assigned_student": project.get("assigned_student", []),
-            "assigned_mentor": project.get("assigned_mentor", []),
+            "assigned_mentor": enrich_mentor_data_with_shift_times(project.get("assigned_mentor", []), user_collection),
             "project_counsellor": project.get("project_counsellor"),
             "milestones": processed_milestones,
             "tasks": processed_tasks,
@@ -1516,7 +1574,9 @@ async def get_project_chat_participants(
                         "full_name": mentor_user.get("full_name"),
                         "email": mentor_user.get("email"),
                         "profile_photo": mentor_user.get("profile_photo"),
-                        "user_role": mentor_user.get("user_role")
+                        "user_role": mentor_user.get("user_role"),
+                        "start_shift_time": mentor_user.get("start_shift_time"),
+                        "end_shift_time": mentor_user.get("end_shift_time")
                     })
             except Exception:
                 continue
