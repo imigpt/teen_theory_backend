@@ -1111,9 +1111,8 @@ async def update_user(
 
 @user_router.put("/update_shift_time")
 async def update_shift_time(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    start_shift_time: Optional[str] = Form(None),
-    end_shift_time: Optional[str] = Form(None)
+    payload: dict,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Update user shift timings using Bearer token"""
     token = credentials.credentials
@@ -1127,6 +1126,10 @@ async def update_shift_time(
             "success": False,
             "message": "Invalid or expired token"
         }
+    
+    # Get shift times from payload
+    start_shift_time = payload.get("start_shift_time")
+    end_shift_time = payload.get("end_shift_time")
     
     # Prepare update data
     update_data = {}
