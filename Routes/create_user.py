@@ -410,7 +410,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                         "full_name": creator.get("full_name"),
                         "email": creator.get("email"),
                         "profile_photo": creator.get("profile_photo"),
-                        "user_role": creator.get("user_role")
+                        "user_role": creator.get("user_role"),
+                        "start_shift_time": creator.get("start_shift_time"),
+                        "end_shift_time": creator.get("end_shift_time")
                     }
             
             # Enrich assigned_mentor with shift times
