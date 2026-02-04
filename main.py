@@ -10,6 +10,7 @@ from Routes.create_projects import project_router
 from Routes.tickets import ticket_router
 from Routes.meetings import meeting_router
 from Routes.chat import chat_router
+from Routes.notes import notes_router
 import logging
 import os
 
@@ -57,6 +58,7 @@ app.include_router(project_router)
 app.include_router(ticket_router)
 app.include_router(meeting_router)
 app.include_router(chat_router)
+app.include_router(notes_router)
 
 # Mount static files for uploads
 uploads_dir = "uploads"
